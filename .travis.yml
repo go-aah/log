@@ -11,10 +11,13 @@ branches:
 
 go:
   - 1.8
-  - 1.8.x
+  - 1.9
   - tip
 
 go_import_path: aahframework.org/log.v0
+
+install:
+  - go get -t -v ./...
 
 script:
   - bash <(curl -s https://aahframework.org/go-test)

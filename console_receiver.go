@@ -5,10 +5,12 @@
 package log
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
+	"sync"
 
 	"aahframework.org/config.v0"
 	"aahframework.org/essentials.v0"
@@ -18,8 +20,8 @@ var (
 	// ANSI color codes
 	resetColor   = []byte("\033[0m")
 	levelToColor = [][]byte{
-		levelFatal: []byte("\033[0;31m"), // red
-		levelPanic: []byte("\033[0;31m"), // red
+		LevelFatal: []byte("\033[0;31m"), // red
+		LevelPanic: []byte("\033[0;31m"), // red
 		LevelError: []byte("\033[0;31m"), // red
 		LevelWarn:  []byte("\033[0;33m"), // yellow
 		LevelInfo:  []byte("\033[0;37m"), // white
@@ -38,6 +40,7 @@ type ConsoleReceiver struct {
 	flags        []ess.FmtFlagPart
 	isCallerInfo bool
 	isColor      bool
+	mu           *sync.Mutex
 }
 
 //‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
@@ -49,10 +52,16 @@ func (c *ConsoleReceiver) Init(cfg *config.Config) error {
 	c.out = os.Stderr
 	c.isColor = runtime.GOOS != "windows"
 
+	if v, found := cfg.Bool("log.color"); found {
+		c.isColor = v
+	}
+
 	c.formatter = cfg.StringDefault("log.format", "text")
 	if !(c.formatter == textFmt || c.formatter == jsonFmt) {
 		return fmt.Errorf("log: unsupported format '%s'", c.formatter)
 	}
+
+	c.mu = &sync.Mutex{}
 
 	return nil
 }
@@ -83,12 +92,18 @@ func (c *ConsoleReceiver) IsCallerInfo() bool {
 
 // Log method writes the log entry into os.Stderr.
 func (c *ConsoleReceiver) Log(entry *Entry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.isColor {
 		_, _ = c.out.Write(levelToColor[entry.Level])
 	}
 
-	msg := applyFormatter(c.formatter, c.flags, entry)
-	if len(msg) == 0 || msg[len(msg)-1] != '\n' {
+	var msg []byte
+	if c.formatter == textFmt {
+		msg = textFormatter(c.flags, entry)
+	} else {
+		msg, _ = json.Marshal(entry)
 		msg = append(msg, '\n')
 	}
 	_, _ = c.out.Write(msg)
